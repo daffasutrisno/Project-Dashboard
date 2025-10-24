@@ -287,3 +287,446 @@ def aggregate_cdr_data(df, cdr_column, days_back=35, interval=2):
     print(f"  - {len(result)} days displayed (every {interval} days from END)")
     
     return result
+
+def aggregate_sgnb_sr_data(df, sgnb_column, days_back=35, interval=2):
+    """
+    Special aggregation for Sgnb addition SR chart
+    Shows dates with EVERY 2nd DAY interval, counting from LAST date (newest)
+    With GAP DETECTION like Accessibility (jump to 4 days if gap)
+    
+    Args:
+        df (pd.DataFrame): Raw data
+        sgnb_column (str): Sgnb SR column name
+        days_back (int): Number of days in range
+        interval (int): Show every Nth day (default: 2)
+        
+    Returns:
+        pd.DataFrame: Daily Sgnb SR data with interval logic
+    """
+    # Get max date
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    # Aggregate by date (max value per day)
+    daily_sgnb = df.groupby('date_column').agg({
+        sgnb_column: 'max'
+    }).reset_index()
+    
+    # Filter: only dates within range
+    daily_sgnb = daily_sgnb[
+        (daily_sgnb['date_column'] >= start_date) & 
+        (daily_sgnb['date_column'] <= max_date)
+    ].copy()
+    
+    # Filter: skip if zero or null (like Accessibility)
+    valid_data = daily_sgnb[
+        (daily_sgnb[sgnb_column].notna()) & 
+        (daily_sgnb[sgnb_column] > 0)
+    ].copy()
+    
+    if len(valid_data) == 0:
+        print(f"Sgnb SR: No valid data in range")
+        return valid_data
+    
+    # Apply interval logic: every 2 days, COUNT FROM END (newest data)
+    # WITH GAP DETECTION (like Accessibility)
+    result_indices = []
+    current_idx = len(valid_data) - 1  # Start from LAST index
+    
+    while current_idx >= 0:
+        result_indices.append(current_idx)
+        
+        # Try to jump by interval (2 days) BACKWARD
+        next_idx = current_idx - interval
+        
+        # Check if next_idx exists
+        if next_idx >= 0:
+            # Check actual date difference
+            current_date = valid_data.iloc[current_idx]['date_column']
+            next_date = valid_data.iloc[next_idx]['date_column']
+            days_diff = (current_date - next_date).days
+            
+            # If gap is larger than expected (means some days were skipped)
+            # Jump further by interval (becomes 4 days total)
+            if days_diff > interval * 1.5:  # Allow some tolerance
+                # Data was skipped, jump by another interval
+                next_idx = next_idx - interval
+            
+            current_idx = next_idx
+        else:
+            # No more data
+            break
+    
+    # Reverse to get chronological order (oldest to newest)
+    result_indices.reverse()
+    result = valid_data.iloc[result_indices].copy()
+    
+    print(f"Sgnb SR data: {(max_date - start_date).days + 1} days in range")
+    print(f"  - {len(valid_data)} days with valid data (>0)")
+    print(f"  - {len(result)} days displayed (every 2 days from END, gap detection)")
+    
+    return result
+
+def aggregate_traffic_data(df, traffic_column, days_back=35, interval=2):
+    """
+    Special aggregation for Traffic chart
+    Uses MAX aggregation per day (NOT SUM)
+    Shows dates with EVERY 2nd DAY interval, counting from LAST date (newest)
+    With GAP DETECTION like Accessibility (jump to 4 days if gap)
+    Zero is VALID (not skipped)
+    
+    Args:
+        df (pd.DataFrame): Raw data
+        traffic_column (str): Traffic column name
+        days_back (int): Number of days in range
+        interval (int): Show every Nth day (default: 2)
+        
+    Returns:
+        pd.DataFrame: Daily traffic data with interval logic
+    """
+    # Get max date
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    # Aggregate by date (MAX per day - ambil nilai tertinggi, bukan sum)
+    daily_traffic = df.groupby('date_column').agg({
+        traffic_column: 'max'  # MAX, bukan SUM!
+    }).reset_index()
+    
+    # Filter: only dates within range
+    daily_traffic = daily_traffic[
+        (daily_traffic['date_column'] >= start_date) & 
+        (daily_traffic['date_column'] <= max_date)
+    ].copy()
+    
+    # Filter: only keep NOT NULL (zero is VALID!)
+    valid_data = daily_traffic[
+        daily_traffic[traffic_column].notna()
+    ].copy()
+    
+    if len(valid_data) == 0:
+        print(f"Traffic: No valid data in range")
+        return valid_data
+    
+    # Apply interval logic: every 2 days, COUNT FROM END (newest data)
+    # WITH GAP DETECTION (like Accessibility)
+    result_indices = []
+    current_idx = len(valid_data) - 1  # Start from LAST index
+    
+    while current_idx >= 0:
+        result_indices.append(current_idx)
+        
+        # Try to jump by interval (2 days) BACKWARD
+        next_idx = current_idx - interval
+        
+        # Check if next_idx exists
+        if next_idx >= 0:
+            # Check actual date difference
+            current_date = valid_data.iloc[current_idx]['date_column']
+            next_date = valid_data.iloc[next_idx]['date_column']
+            days_diff = (current_date - next_date).days
+            
+            # If gap is larger than expected (means some days were skipped)
+            # Jump further by interval (becomes 4 days total)
+            if days_diff > interval * 1.5:  # Allow some tolerance
+                # Data was skipped, jump by another interval
+                next_idx = next_idx - interval
+            
+            current_idx = next_idx
+        else:
+            # No more data
+            break
+    
+    # Reverse to get chronological order (oldest to newest)
+    result_indices.reverse()
+    result = valid_data.iloc[result_indices].copy()
+    
+    print(f"Traffic data: {(max_date - start_date).days + 1} days in range")
+    print(f"  - {len(valid_data)} days with valid data (not null)")
+    print(f"  - {len(result)} days displayed (every 2 days from END, gap detection)")
+    print(f"  - Zero is VALID (not skipped)")
+    
+    return result
+
+def aggregate_eut_thp_data(df, eut_column, thp_column, days_back=35):
+    """
+    Special aggregation for EUT vs DL User Thp chart
+    Uses thp_column as primary index (patokan)
+    Shows ALL valid days based on thp_column (like Availability)
+    eut_column follows thp_column index
+    
+    Args:
+        df (pd.DataFrame): Raw data
+        eut_column (str): EUT column name (g5_eut_bhv)
+        thp_column (str): Thp column name (g5_userdl_thp) - PRIMARY INDEX
+        days_back (int): Number of days in range
+        
+    Returns:
+        tuple: (dates, eut_values, thp_values)
+    """
+    # Get max date
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    # Aggregate by date (MAX for both)
+    daily_data = df.groupby('date_column').agg({
+        eut_column: 'max',
+        thp_column: 'max'
+    }).reset_index()
+    
+    # Filter: only dates within range
+    daily_data = daily_data[
+        (daily_data['date_column'] >= start_date) & 
+        (daily_data['date_column'] <= max_date)
+    ].copy()
+    
+    # Filter: based on thp_column (PRIMARY) - skip zero/null
+    # This is the PATOKAN for x-axis
+    valid_data = daily_data[
+        (daily_data[thp_column].notna()) & 
+        (daily_data[thp_column] > 0)
+    ].copy()
+    
+    if len(valid_data) == 0:
+        print(f"EUT vs Thp: No valid data in range")
+        return valid_data
+    
+    print(f"EUT vs Thp data: {(max_date - start_date).days + 1} days in range")
+    print(f"  - {len(valid_data)} days with valid thp data (>0) - PRIMARY INDEX")
+    print(f"  - EUT line will follow thp index, show only where eut data exists")
+    
+    return valid_data
+
+def aggregate_user5g_data(df, user_column, days_back=35, interval=2):
+    """
+    Special aggregation for User 5G chart
+    Uses MAX aggregation per day (NOT SUM)
+    Shows dates with EVERY 2nd DAY interval, counting from LAST date (newest)
+    Simple interval (no gap detection like CDR)
+    Zero is VALID (not skipped), skip only if NULL
+    
+    Args:
+        df (pd.DataFrame): Raw data
+        user_column (str): User column name
+        days_back (int): Number of days in range
+        interval (int): Show every Nth day (default: 2)
+        
+    Returns:
+        pd.DataFrame: Daily user data with interval logic
+    """
+    # Get max date
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    # Aggregate by date (MAX per day - NOT SUM!)
+    daily_user = df.groupby('date_column').agg({
+        user_column: 'max'  # MAX, bukan SUM!
+    }).reset_index()
+    
+    # Filter: only dates within range
+    daily_user = daily_user[
+        (daily_user['date_column'] >= start_date) & 
+        (daily_user['date_column'] <= max_date)
+    ].copy()
+    
+    # Filter: only keep NOT NULL (zero is VALID!)
+    valid_data = daily_user[
+        daily_user[user_column].notna()
+    ].copy()
+    
+    if len(valid_data) == 0:
+        print(f"User 5G: No valid data in range")
+        return valid_data
+    
+    # Apply interval logic: every 2 days, COUNT FROM END (newest data)
+    # Simple interval (no gap detection, like CDR)
+    n_total = len(valid_data)
+    result_indices = list(range(n_total - 1, -1, -interval))
+    result_indices.reverse()
+    result = valid_data.iloc[result_indices].copy()
+    
+    print(f"User 5G data: {(max_date - start_date).days + 1} days in range")
+    print(f"  - {len(valid_data)} days with valid data (not null)")
+    print(f"  - {len(result)} days displayed (every {interval} days from END)")
+    print(f"  - Zero is VALID (not skipped)")
+    
+    return result
+
+def aggregate_prb_util_data(df, prb_column, count_column, days_back=35, interval=2):
+    """
+    Special aggregation for PRB Util chart (Line + Bar dual Y-axis)
+    Shows dates with EVERY 2nd DAY interval with GAP DETECTION
+    
+    Args:
+        df (pd.DataFrame): Raw data
+        prb_column (str): PRB util column (g5_dlprb_util) - PRIMARY
+        count_column (str): Cells count column (dl_prb_util_5g_count_gt_085)
+        days_back (int): Number of days in range
+        interval (int): Show every Nth day (default: 2)
+        
+    Returns:
+        pd.DataFrame: Daily data with interval logic
+    """
+    # Get max date
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    # Aggregate by date (MAX for both)
+    daily_data = df.groupby('date_column').agg({
+        prb_column: 'max',
+        count_column: 'max'
+    }).reset_index()
+    
+    # Filter: only dates within range
+    daily_data = daily_data[
+        (daily_data['date_column'] >= start_date) & 
+        (daily_data['date_column'] <= max_date)
+    ].copy()
+    
+    # Filter: based on prb_column (PRIMARY) - skip zero/null
+    valid_data = daily_data[
+        (daily_data[prb_column].notna()) & 
+        (daily_data[prb_column] > 0)
+    ].copy()
+    
+    if len(valid_data) == 0:
+        print(f"PRB Util: No valid data in range")
+        return valid_data
+    
+    # Apply interval logic: every 2 days from END with gap detection
+    result_indices = []
+    current_idx = len(valid_data) - 1
+    
+    while current_idx >= 0:
+        result_indices.append(current_idx)
+        next_idx = current_idx - interval
+        
+        if next_idx >= 0:
+            current_date = valid_data.iloc[current_idx]['date_column']
+            next_date = valid_data.iloc[next_idx]['date_column']
+            days_diff = (current_date - next_date).days
+            
+            if days_diff > interval * 1.5:
+                next_idx = next_idx - interval
+            
+            current_idx = next_idx
+        else:
+            break
+    
+    result_indices.reverse()
+    result = valid_data.iloc[result_indices].copy()
+    
+    print(f"PRB Util data: {(max_date - start_date).days + 1} days in range")
+    print(f"  - {len(valid_data)} days with valid data (>0)")
+    print(f"  - {len(result)} days displayed (every 2 days from END, gap detection)")
+    
+    return result
+
+def aggregate_inter_esgnb_data(df, column, days_back=35, interval=2):
+    """
+    Special aggregation for Inter esgNB chart
+    Every 2 days from END, simple (like CDR), zero is VALID
+    
+    Args:
+        df (pd.DataFrame): Raw data
+        column (str): Inter esgNB column name
+        days_back (int): Number of days in range
+        interval (int): Show every Nth day (default: 2)
+        
+    Returns:
+        pd.DataFrame: Daily data with interval logic
+    """
+    # Get max date
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    # Aggregate by date (MAX per day)
+    daily_data = df.groupby('date_column').agg({
+        column: 'max'
+    }).reset_index()
+    
+    # Filter: only dates within range
+    daily_data = daily_data[
+        (daily_data['date_column'] >= start_date) & 
+        (daily_data['date_column'] <= max_date)
+    ].copy()
+    
+    # Filter: only keep NOT NULL (zero is VALID!)
+    valid_data = daily_data[daily_data[column].notna()].copy()
+    
+    if len(valid_data) == 0:
+        print(f"Inter esgNB: No valid data in range")
+        return valid_data
+    
+    # Apply interval logic: every 2 days from END (simple, no gap)
+    n_total = len(valid_data)
+    result_indices = list(range(n_total - 1, -1, -interval))
+    result_indices.reverse()
+    result = valid_data.iloc[result_indices].copy()
+    
+    print(f"Inter esgNB data: {(max_date - start_date).days + 1} days in range")
+    print(f"  - {len(valid_data)} days with valid data (not null)")
+    print(f"  - {len(result)} days displayed (every {interval} days from END)")
+    print(f"  - Zero is VALID (not skipped)")
+    
+    return result
+
+def aggregate_intra_esgnb_data(df, column, days_back=35, interval=2):
+    """
+    Special aggregation for Intra esgNB chart
+    Every 2 days from END with gap detection, skip zero
+    """
+    max_date = df['date_column'].max()
+    start_date = max_date - pd.Timedelta(days=days_back)
+    
+    daily_data = df.groupby('date_column').agg({column: 'max'}).reset_index()
+    
+    daily_data = daily_data[
+        (daily_data['date_column'] >= start_date) & 
+        (daily_data['date_column'] <= max_date)
+    ].copy()
+    
+    valid_data = daily_data[
+        (daily_data[column].notna()) & 
+        (daily_data[column] > 0)
+    ].copy()
+    
+    if len(valid_data) == 0:
+        return valid_data
+    
+    # Every 2 days from END with gap detection
+    result_indices = []
+    current_idx = len(valid_data) - 1
+    
+    while current_idx >= 0:
+        result_indices.append(current_idx)
+        next_idx = current_idx - interval
+        
+        if next_idx >= 0:
+            current_date = valid_data.iloc[current_idx]['date_column']
+            next_date = valid_data.iloc[next_idx]['date_column']
+            days_diff = (current_date - next_date).days
+            
+            if days_diff > interval * 1.5:
+                next_idx = next_idx - interval
+            
+            current_idx = next_idx
+        else:
+            break
+    
+    result_indices.reverse()
+    return valid_data.iloc[result_indices].copy()
+
+def aggregate_intra_sgnb_data(df, column, days_back=35, interval=2):
+    """
+    Special aggregation for Intra sgNB intrafreq chart
+    SAME as Intra esgNB
+    """
+    return aggregate_intra_esgnb_data(df, column, days_back, interval)
+
+def aggregate_inter_sgnb_intrafreq_data(df, column, days_back=35, interval=2):
+    """
+    Special aggregation for Inter sgNB intrafreq chart
+    SAME as Intra esgNB
+    """
+    return aggregate_intra_esgnb_data(df, column, days_back, interval)

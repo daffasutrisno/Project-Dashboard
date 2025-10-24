@@ -5,13 +5,23 @@ from utils import (
     aggregate_daily_data, 
     aggregate_availability_data,
     aggregate_accessibility_data,
-    aggregate_cdr_data,  # NEW
+    aggregate_cdr_data,
+    aggregate_sgnb_sr_data,
+    aggregate_traffic_data,
+    aggregate_eut_thp_data,
+    aggregate_user5g_data,
+    aggregate_prb_util_data,
+    aggregate_inter_esgnb_data,
+    aggregate_intra_esgnb_data,
+    aggregate_intra_sgnb_data,
+    aggregate_inter_sgnb_intrafreq_data,  # FIXED NAME
     interpolate_availability, 
     validate_daily_data
 )
 from charts import (
     AvailabilityChart5G, LineChart5G, AreaChart5G, 
-    BarChart5G, DualLineChart5G, CDRChart5G
+    BarChart5G, DualLineChart5G, CDRChart5G, SgnbSRChart5G, 
+    TrafficChart5G, EUTThpChart5G, User5GChart, PRBUtilChart5G  # ADD PRBUtilChart5G
 )
 
 def generate_5g_charts(df):
@@ -56,6 +66,17 @@ def generate_5g_charts(df):
     )
     charts['cdr'] = chart.create()
     
+    # Chart 4: Sgnb addition SR - EVERY 2 DAYS from END with GAP DETECTION (like Accessibility)
+    sgnb_data = aggregate_sgnb_sr_data(df, 'sgnb_addition_sr', days_back=35, interval=2)
+    
+    chart = SgnbSRChart5G(
+        sgnb_data['date_column'],
+        sgnb_data['sgnb_addition_sr'],
+        'Sgnb addition SR',
+        '%'
+    )
+    charts['sgnb_sr'] = chart.create()
+    
     # For OTHER charts: use standard aggregation
     # Returns ALL valid days (not every 2 days anymore)
     metrics_5g = {
@@ -81,98 +102,113 @@ def generate_5g_charts(df):
     dates = daily_data['date_column']
     data_display = daily_data
     
-    # Chart 4: Sgnb addition SR
-    chart = LineChart5G(
-        dates,
-        data_display['sgnb_addition_sr'] * 100,
-        'Sgnb addition SR',
-        '%',
-        ylim=(98, 100.5),
-        ytick_format='{:.2f}%'
-    )
-    charts['sgnb_sr'] = chart.create()
+    # Chart 5: Total Traffic - EVERY 2 DAYS from END with GAP DETECTION (like Accessibility)
+    # Zero is VALID (not skipped)
+    traffic_data = aggregate_traffic_data(df, 'traffic_5g', days_back=35, interval=2)
     
-    # Chart 5: Total Traffic
-    chart = AreaChart5G(
-        dates,
-        data_display['traffic_5g'],
+    chart = TrafficChart5G(
+        traffic_data['date_column'],
+        traffic_data['traffic_5g'],
         'Total Traffic (GB)',
         'GB'
     )
     charts['traffic'] = chart.create()
     
-    # Chart 6: EUT vs DL User Thp
-    chart = DualLineChart5G(
-        dates,
-        data_display['traffic_5g'] / 1000,
-        data_display['g5_userdl_thp'],
+    # Chart 6: EUT vs DL User Thp - Thp as PRIMARY index (like Availability)
+    # Every day based on thp data, EUT follows
+    eut_thp_data = aggregate_eut_thp_data(df, 'g5_eut_bhv', 'g5_userdl_thp', days_back=35)
+    
+    chart = EUTThpChart5G(
+        eut_thp_data['date_column'],
+        eut_thp_data['g5_eut_bhv'].values,  # Line 1: EUT (follows)
+        eut_thp_data['g5_userdl_thp'].values,  # Line 2: Thp (primary)
         'EUT vs DL User Thp',
-        'Value',
-        'traffic_5g',
-        'dl_user_thp_5g'
+        'Value'
     )
     charts['eut_thp'] = chart.create()
     
-    # Chart 7: User 5G
-    chart = BarChart5G(
-        dates,
-        data_display['sum_en_dc_user_5g_wd'],
+    # Chart 7: User 5G - EVERY 2 DAYS from END (simple, like CDR)
+    # Zero is VALID (not skipped), skip only if null
+    user5g_data = aggregate_user5g_data(df, 'sum_en_dc_user_5g_wd', days_back=35, interval=2)
+    
+    chart = User5GChart(
+        user5g_data['date_column'],
+        user5g_data['sum_en_dc_user_5g_wd'],
         'User 5G',
         'Users'
     )
     charts['user_5g'] = chart.create()
     
-    # Chart 8: DL PRB Util
-    chart = LineChart5G(
-        dates,
-        data_display['g5_dlprb_util'] * 100,
+    # Chart 8: DL PRB Util - EVERY 2 DAYS from END with GAP DETECTION (dual Y-axis)
+    prb_data = aggregate_prb_util_data(
+        df, 'g5_dlprb_util', 'dl_prb_util_5g_count_gt_085', 
+        days_back=35, interval=2
+    )
+    
+    chart = PRBUtilChart5G(
+        prb_data['date_column'],
+        prb_data['g5_dlprb_util'].values,
+        prb_data['dl_prb_util_5g_count_gt_085'].values,
         'DL PRB Util',
-        '%',
-        ytick_format='{:.2f}%'
+        'PRB Util (%)',
+        '#Cells PRB>85%'
     )
     charts['prb_util'] = chart.create()
     
-    # Chart 9: Inter esgNB
+    # Chart 9: Inter esgNB - EVERY 2 DAYS from END (simple, like CDR)
+    inter_esgnb_data = aggregate_inter_esgnb_data(df, 'inter_esgnb', days_back=35, interval=2)
+    
     chart = LineChart5G(
-        dates,
-        data_display['inter_esgnb'] * 100,
+        inter_esgnb_data['date_column'],
+        inter_esgnb_data['inter_esgnb'] * 100,
         'inter_esgnb_pscell_change',
         '%',
         ylim=(0, 120),
-        ytick_format='{:.2f}%'
+        ytick_format='{:.2f}%',
+        hide_top_label=True
     )
     charts['inter_esgnb'] = chart.create()
     
-    # Chart 10: Intra esgNB
+    # Chart 10: Intra esgNB - EVERY 2 DAYS from END with GAP DETECTION
+    intra_esgnb_data = aggregate_intra_esgnb_data(df, 'intra_esgnb', days_back=35, interval=2)
+    
     chart = LineChart5G(
-        dates,
-        data_display['intra_esgnb'] * 100,
+        intra_esgnb_data['date_column'],
+        intra_esgnb_data['intra_esgnb'] * 100,
         'intra_esgnb_pscell_change',
         '%',
-        ylim=(99.80, 100.00),
-        ytick_format='{:.2f}%'
+        ylim=(99.80, 100.02),
+        ytick_format='{:.2f}%',
+        hide_top_label=True
     )
     charts['intra_esgnb'] = chart.create()
     
-    # Chart 11: Intra sgNB intrafreq
+    # Chart 11: Intra sgNB intrafreq - EVERY 2 DAYS from END with GAP DETECTION
+    # SAME configuration as Intra esgNB
+    intra_sgnb_data = aggregate_intra_sgnb_data(df, 'intra_sgnb_intrafreq', days_back=35, interval=2)
+    
     chart = LineChart5G(
-        dates,
-        data_display['intra_sgnb_intrafreq'] * 100,
+        intra_sgnb_data['date_column'],
+        intra_sgnb_data['intra_sgnb_intrafreq'] * 100,
         'intra_sgnb_intrafreq_pscell_change',
         '%',
-        ylim=(99.80, 100.00),
-        ytick_format='{:.2f}%'
+        ylim=(99.80, 100.02),
+        ytick_format='{:.2f}%',
+        hide_top_label=True
     )
     charts['intra_sgnb'] = chart.create()
     
-    # Chart 12: Inter sgNB intrafreq
+    # Chart 12: Inter sgNB intrafreq - EVERY 2 DAYS from END with GAP DETECTION
+    inter_sgnb_data = aggregate_inter_sgnb_intrafreq_data(df, 'inter_sgnb_intrafreq', days_back=35, interval=2)
+    
     chart = LineChart5G(
-        dates,
-        data_display['inter_sgnb_intrafreq'] * 100,
+        inter_sgnb_data['date_column'],
+        inter_sgnb_data['inter_sgnb_intrafreq'] * 100,
         'inter_sgnb_intrafreq_pscell_change',
         '%',
         ylim=(99.0, 100.1),
-        ytick_format='{:.2f}%'
+        ytick_format='{:.1f}%',
+        hide_top_label=True
     )
     charts['inter_sgnb'] = chart.create()
     
